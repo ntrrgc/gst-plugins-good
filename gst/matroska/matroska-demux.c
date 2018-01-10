@@ -3786,10 +3786,10 @@ gst_matroska_demux_parse_blockgroup_or_simpleblock (GstMatroskaDemux * demux,
       GstEvent *segment_event;
 
       if (!GST_CLOCK_TIME_IS_VALID (demux->stream_start_time)) {
-        demux->stream_start_time = lace_time;
+        demux->stream_start_time = 0;
         GST_DEBUG_OBJECT (demux,
             "Setting stream start time to %" GST_TIME_FORMAT,
-            GST_TIME_ARGS (lace_time));
+            GST_TIME_ARGS (demux->stream_start_time));
       }
       clace_time = MAX (lace_time, demux->stream_start_time);
       if (GST_CLOCK_TIME_IS_VALID (demux->common.segment.position) &&
@@ -3800,10 +3800,11 @@ gst_matroska_demux_parse_blockgroup_or_simpleblock (GstMatroskaDemux * demux,
         clace_time = demux->common.segment.position;
         segment->position = GST_CLOCK_TIME_NONE;
       }
-      segment->start = clace_time;
+      segment->start = 0;
       segment->stop = GST_CLOCK_TIME_NONE;
-      segment->time = segment->start - demux->stream_start_time;
-      segment->position = segment->start - demux->stream_start_time;
+      segment->time = 0;
+      segment->offset = clace_time;
+      segment->position = clace_time;
       GST_DEBUG_OBJECT (demux,
           "generated segment starting at %" GST_TIME_FORMAT ": %"
           GST_SEGMENT_FORMAT, GST_TIME_ARGS (lace_time), segment);
