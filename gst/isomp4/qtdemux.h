@@ -195,6 +195,9 @@ struct _GstQTDemux {
   /* Seqnum of the seek event sent upstream.  Will be used to
    * detect incoming FLUSH events corresponding to that */
   guint32 offset_seek_seqnum;
+  /* Whether the FLUSH events received in consequence of a seek
+   * sent upstream should be propagated downstream. */
+  gboolean propagate_flush;
 
   /* UPSTREAM BYTE: Requested upstream byte seek offset.
    * Currently it is only used to check if an incoming BYTE SEGMENT

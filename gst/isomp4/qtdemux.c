@@ -471,6 +471,8 @@ static GNode *qtdemux_tree_get_sibling_by_type_full (GNode * node,
     guint32 fourcc, GstByteReader * parser);
 
 static GstFlowReturn qtdemux_add_fragmented_samples (GstQTDemux * qtdemux);
+static void gst_qtdemux_stream_flush_samples_data (GstQTDemux * qtdemux,
+    QtDemuxStream * stream);
 
 static GstStaticPadTemplate gst_qtdemux_sink_template =
     GST_STATIC_PAD_TEMPLATE ("sink",
@@ -1522,7 +1524,10 @@ gst_qtdemux_do_push_seek (GstQTDemux * qtdemux, GstPad * pad, GstEvent * event)
   event = gst_event_new_seek (rate, GST_FORMAT_BYTES, flags, cur_type, byte_cur,
       stop_type, stop);
   gst_event_set_seqnum (event, seqnum);
+  qtdemux->offset_seek_seqnum = seqnum;
+  qtdemux->propagate_flush = TRUE;
   res = gst_pad_push_event (qtdemux->sinkpad, event);
+  qtdemux->offset_seek_seqnum = GST_SEQNUM_INVALID;
 
   return res;
 
@@ -2346,7 +2351,8 @@ gst_qtdemux_handle_sink_event (GstPad * sinkpad, GstObject * parent,
     }
     case GST_EVENT_FLUSH_START:
     {
-      if (gst_event_get_seqnum (event) == demux->offset_seek_seqnum) {
+      if (gst_event_get_seqnum (event) == demux->offset_seek_seqnum &&
+          !demux->propagate_flush) {
         gst_event_unref (event);
         goto drop;
       }
@@ -2354,15 +2360,55 @@ gst_qtdemux_handle_sink_event (GstPad * sinkpad, GstObject * parent,
     }
     case GST_EVENT_FLUSH_STOP:
     {
-      guint64 dur;
-
-      dur = demux->segment.duration;
-      gst_qtdemux_reset (demux, FALSE);
-      demux->segment.duration = dur;
-
       if (gst_event_get_seqnum (event) == demux->offset_seek_seqnum) {
-        gst_event_unref (event);
-        goto drop;
+        guint64 dur;
+
+        GST_INFO_OBJECT (demux, "Received FLUSH_STOP consequence of seek, "
+            "soft-resetting demuxer...");
+
+        dur = demux->segment.duration;
+        gst_qtdemux_reset (demux, FALSE);
+        demux->segment.duration = dur;
+
+        if (!demux->propagate_flush) {
+          gst_event_unref (event);
+          goto drop;
+        }
+      } else {
+        /* This kind of is used by special applications, like Media Source
+         * Extensions implementations, that sometimes need to discard the
+         * current fragment and start demuxing a new one. (This usually only
+         * makes sense for fragmented media) */
+        int i;
+
+        GST_INFO_OBJECT (demux, "Received non-seek related FLUSH_STOP, "
+            "discarding buffered data and preparing to read a new atom...");
+
+        /* clear any data buffered in the adapter (this includes any incomplete
+         * mdat). */
+        gst_adapter_clear (demux->adapter);
+
+        /* if a mdat was (being) buffered, forget about it. */
+        if (demux->mdatbuffer) {
+          gst_buffer_unref (demux->mdatbuffer);
+          demux->mdatbuffer = NULL;
+        }
+        demux->mdatleft = 0;
+        demux->mdatsize = 0;
+
+        if (demux->restoredata_buffer) {
+          gst_buffer_unref (demux->restoredata_buffer);
+          demux->restoredata_buffer = NULL;
+        }
+
+        /* forget data about samples found before */
+        for (i = 0; i < demux->n_streams; i++)
+          gst_qtdemux_stream_flush_samples_data (demux, demux->streams[i]);
+
+        /* resume atom parsing */
+        demux->state = QTDEMUX_STATE_INITIAL;
+        demux->neededbytes = 16;
+        demux->todrop = 0;
       }
       break;
     }
@@ -6214,6 +6260,8 @@ gst_qtdemux_post_progress (GstQTDemux * demux, gint num, gint denom)
           gst_structure_new ("progress", "percent", G_TYPE_INT, perc, NULL)));
 }
 
+/* Used to jump after or before an mdat when there is one at the beginning of
+ * the file when demuxing in push mode. */
 static gboolean
 qtdemux_seek_offset (GstQTDemux * demux, guint64 offset)
 {
@@ -6229,6 +6277,7 @@ qtdemux_seek_offset (GstQTDemux * demux, guint64 offset)
 
   /* store seqnum to drop flush events, they don't need to reach downstream */
   demux->offset_seek_seqnum = gst_event_get_seqnum (event);
+  demux->propagate_flush = FALSE;
   res = gst_pad_push_event (demux->sinkpad, event);
   demux->offset_seek_seqnum = GST_SEQNUM_INVALID;
 
