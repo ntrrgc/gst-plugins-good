@@ -468,6 +468,8 @@ static GNode *qtdemux_tree_get_sibling_by_type_full (GNode * node,
     guint32 fourcc, GstByteReader * parser);
 
 static GstFlowReturn qtdemux_add_fragmented_samples (GstQTDemux * qtdemux);
+static void gst_qtdemux_stream_flush_samples_data (GstQTDemux * qtdemux,
+    QtDemuxStream * stream);
 
 static GstStaticPadTemplate gst_qtdemux_sink_template =
     GST_STATIC_PAD_TEMPLATE ("sink",
@@ -2198,6 +2200,8 @@ gst_qtdemux_handle_sink_event (GstPad * sinkpad, GstObject * parent,
       gint idx;
       GstSegment segment;
 
+      goto exit;
+
       /* some debug output */
       gst_event_copy_segment (event, &segment);
       GST_DEBUG_OBJECT (demux, "received newsegment %" GST_SEGMENT_FORMAT,
@@ -2333,11 +2337,32 @@ gst_qtdemux_handle_sink_event (GstPad * sinkpad, GstObject * parent,
     }
     case GST_EVENT_FLUSH_STOP:
     {
-      guint64 dur;
+      gint i;
+      GST_INFO_OBJECT (demux, "MSE-style flush_stop at state = %d",
+          demux->state);
 
-      dur = demux->segment.duration;
-      gst_qtdemux_reset (demux, FALSE);
-      demux->segment.duration = dur;
+      /* clear any buffered data */
+      demux->offset += gst_adapter_available (demux->adapter);
+      gst_adapter_flush (demux->adapter,
+          gst_adapter_available (demux->adapter));
+      if (demux->restoredata_buffer) {
+        g_assert (gst_adapter_available (demux->adapter) == 0);
+
+        gst_adapter_push (demux->adapter, demux->restoredata_buffer);
+        demux->restoredata_buffer = NULL;
+        demux->offset = demux->restoredata_offset;
+      }
+
+      /* forget the sample table */
+      for (i = 0; i < demux->n_streams; i++) {
+        gst_qtdemux_stream_flush_samples_data (demux, demux->streams[i]);
+      }
+
+      /* resume atom parsing */
+      demux->state = QTDEMUX_STATE_INITIAL;
+      demux->neededbytes = 16;
+      demux->todrop = 0;
+      demux->mdatleft = 0;
 
       if (gst_event_get_seqnum (event) == demux->offset_seek_seqnum) {
         gst_event_unref (event);
