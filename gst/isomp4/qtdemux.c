@@ -6643,8 +6643,6 @@ gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
             gst_qtdemux_check_send_pending_segment (demux);
 
             /* fragmented streams headers shouldn't contain edts atoms */
-            /* Objection: Why? Actually, edit list support is required by MSE:
-             * https://www.w3.org/TR/mse-byte-stream-format-isobmff/#iso-init-segments */
             if (!demux->fragmented) {
               for (n = 0; n < demux->n_streams; n++) {
                 gst_qtdemux_stream_send_initial_gap_segments (demux,
