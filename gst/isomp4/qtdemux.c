@@ -2167,7 +2167,9 @@ gst_qtdemux_map_and_push_segments (GstQTDemux * qtdemux, GstSegment * segment)
      * at the beginning and then one segment after, other scenarios are not
      * supported and are discarded when parsing the edts */
     for (i = 0; i < stream->n_segments; i++) {
-      if (stream->segments[i].stop_time > segment->start) {
+      /* find the track edit containing the requested position in the movie */
+      if (stream->segments[i].stop_time == 0    /* the edit extends to the end of the track */
+          || stream->segments[i].stop_time > segment->start) {
         gst_qtdemux_activate_segment (qtdemux, stream, i,
             stream->time_position);
         if (QTSEGMENT_IS_EMPTY (&stream->segments[i])) {
