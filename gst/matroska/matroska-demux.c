@@ -3770,6 +3770,12 @@ gst_matroska_demux_parse_blockgroup_or_simpleblock (GstMatroskaDemux * demux,
         clace_time = demux->common.segment.position;
         segment->position = GST_CLOCK_TIME_NONE;
       }
+
+      if (clace_time > stream->codec_delay)
+        clace_time -= stream->codec_delay;
+      else
+        clace_time = 0;
+
       segment->start = 0;
       segment->stop = GST_CLOCK_TIME_NONE;
       segment->time = 0;
