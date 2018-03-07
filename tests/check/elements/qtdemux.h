@@ -31,6 +31,7 @@
 #include <glib/gstdio.h>
 
 #include <gst/check/gstcheck.h>
+#include <gst/gst.h>
 
 /* Fragments taken from http://www.bok.net/dash/tears_of_steel/cleartext/stream.mpd
  *
