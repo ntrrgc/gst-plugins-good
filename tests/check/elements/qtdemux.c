@@ -800,8 +800,15 @@ test_qtdemux_edit_lists_no_edts (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
+  /* Bug workaround: the end of the segment should actually be 2333333333.
+   * When there is no edit list, qtdemux takes 2 seconds from the mhvd duration
+   * field, but that field is not reliable: it is optional and the spec does
+   * not specify whether that duration includes the first few moments in track
+   * time which have no presentation. Instead, it would be more reliable to
+   * compute the duration from the sample index, as ffmpeg does.
+   * The generated test cases don't update this field. */
   event_list_add_segment (&expected_events, typical_segment (&segment, 0,
-          2 * GST_SECOND));
+          2000000000));
 
   /* *INDENT-OFF* */
   event_list_add_buffer (&expected_events,  333333333,  333333333, 333333333);
