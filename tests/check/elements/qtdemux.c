@@ -800,6 +800,9 @@ test_qtdemux_edit_lists_no_edts (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
+  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
+    event_list_add_segment (&expected_events, default_time_segment ());
+
   /* Bug workaround: the end of the segment should actually be 2333333333.
    * When there is no edit list, qtdemux takes 2 seconds from the mhvd duration
    * field, but that field is not reliable: it is optional and the spec does
