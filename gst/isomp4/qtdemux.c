@@ -6939,7 +6939,6 @@ gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
         sample = &stream->samples[stream->sample_index];
 
         if (G_LIKELY (!(STREAM_IS_EOS (stream)))) {
-          GstBuffer *outbuf;
           GST_DEBUG_OBJECT (demux, "stream : %" GST_FOURCC_FORMAT,
               GST_FOURCC_ARGS (CUR_STREAM (stream)->fourcc));
 
@@ -6948,13 +6947,36 @@ gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
           duration = QTSAMPLE_DUR_DTS (stream, sample, dts);
           keyframe = QTSAMPLE_KEYFRAME (stream, sample);
 
-          outbuf = gst_adapter_take_buffer (demux->adapter, demux->neededbytes);
+          /* check for segment end */
+          if (G_UNLIKELY (demux->segment.stop != -1
+                  && demux->segment.stop <= pts && stream->on_keyframe)) {
+            GST_DEBUG_OBJECT (demux, "we reached the end of our segment.");
+            stream->time_position = GST_CLOCK_TIME_NONE;        /* this means EOS */
 
-          /* FIXME: should either be an assert or a plain check */
-          g_return_val_if_fail (outbuf != NULL, GST_FLOW_ERROR);
+            /* skip this data, stream is EOS */
+            gst_adapter_flush (demux->adapter, demux->neededbytes);
+            demux->offset += demux->neededbytes;
 
-          ret = gst_qtdemux_decorate_and_push_buffer (demux, stream, outbuf,
-              dts, pts, duration, keyframe, dts, demux->offset);
+            /* check if all streams are eos */
+            ret = GST_FLOW_EOS;
+            for (i = 0; i < demux->n_streams; i++) {
+              if (!STREAM_IS_EOS (demux->streams[i])) {
+                ret = GST_FLOW_OK;
+                break;
+              }
+            }
+          } else {
+            GstBuffer *outbuf;
+
+            outbuf =
+                gst_adapter_take_buffer (demux->adapter, demux->neededbytes);
+
+            /* FIXME: should either be an assert or a plain check */
+            g_return_val_if_fail (outbuf != NULL, GST_FLOW_ERROR);
+
+            ret = gst_qtdemux_decorate_and_push_buffer (demux, stream, outbuf,
+                dts, pts, duration, keyframe, dts, demux->offset);
+          }
 
           /* combine flows */
           ret = gst_qtdemux_combine_flows (demux, stream, ret);
