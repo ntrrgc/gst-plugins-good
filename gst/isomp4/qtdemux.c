@@ -10,6 +10,8 @@
  * Copyright (C) <2014> Centricular Ltd
  * Copyright (C) <2015> YouView TV Ltd.
  * Copyright (C) <2016> British Broadcasting Corporation
+ * Copyright (C) <2018> Igalia S.L. <aboya@igalia.com>
+ * Copyright (C) <2018> Metrological
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -6422,6 +6424,42 @@ gst_qtdemux_chain (GstPad * sinkpad, GstObject * parent, GstBuffer * inbuf)
   return gst_qtdemux_process_adapter (demux, FALSE);
 }
 
+static guint64
+gst_segment_to_stream_time_clamped (const GstSegment * segment,
+    guint64 position)
+{
+  guint64 segment_stream_time_start;
+  guint64 segment_stream_time_stop = GST_CLOCK_TIME_NONE;
+  guint64 stream_pts_unsigned;
+  int ret;
+
+  g_return_val_if_fail (segment != NULL, GST_CLOCK_TIME_NONE);
+  g_return_val_if_fail (segment->format == GST_FORMAT_TIME,
+      GST_CLOCK_TIME_NONE);
+
+  segment_stream_time_start = segment->time;
+  if (segment->stop != GST_CLOCK_TIME_NONE)
+    segment_stream_time_stop =
+        gst_segment_to_stream_time (segment, GST_FORMAT_TIME, segment->stop);
+
+  ret =
+      gst_segment_to_stream_time_full (segment, GST_FORMAT_TIME, position,
+      &stream_pts_unsigned);
+  /* ret == 0 if the segment is invalid (either position, segment->time or the segment start are -1). */
+  g_return_val_if_fail (ret != 0, GST_CLOCK_TIME_NONE);
+
+  if (ret == -1 || stream_pts_unsigned < segment_stream_time_start) {
+    /* Negative or prior to segment start stream time, clamp to segment start. */
+    return segment_stream_time_start;
+  } else if (segment_stream_time_stop != GST_CLOCK_TIME_NONE
+      && stream_pts_unsigned > segment_stream_time_stop) {
+    /* Clamp to segment end. */
+    return segment_stream_time_stop;
+  } else {
+    return stream_pts_unsigned;
+  }
+}
+
 static GstFlowReturn
 gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
 {
@@ -6831,7 +6869,7 @@ gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
         QtDemuxStream *stream = NULL;
         QtDemuxSample *sample;
         int i = -1;
-        GstClockTime dts, pts, duration;
+        GstClockTime dts, pts, stream_pts, duration;
         gboolean keyframe;
 
         GST_DEBUG_OBJECT (demux,
@@ -6937,12 +6975,15 @@ gst_qtdemux_process_adapter (GstQTDemux * demux, gboolean force)
 
           dts = QTSAMPLE_DTS (stream, sample);
           pts = QTSAMPLE_PTS (stream, sample);
+          stream_pts =
+              gst_segment_to_stream_time_clamped (&stream->segment, pts);
           duration = QTSAMPLE_DUR_DTS (stream, sample, dts);
           keyframe = QTSAMPLE_KEYFRAME (stream, sample);
 
           /* check for segment end */
           if (G_UNLIKELY (demux->segment.stop != -1
-                  && demux->segment.stop <= pts && stream->on_keyframe)) {
+                  && demux->segment.stop <= stream_pts
+                  && stream->on_keyframe)) {
             GST_DEBUG_OBJECT (demux, "we reached the end of our segment.");
             stream->time_position = GST_CLOCK_TIME_NONE;        /* this means EOS */
 
