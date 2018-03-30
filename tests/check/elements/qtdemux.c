@@ -778,7 +778,7 @@ default_time_segment ()
  * If any of these behaviors is fixed, update the constant before running the tests. */
 
 /* In push mode a dummy default segment is sent before the first, useful one. */
-static const gboolean EXPECT_BUGGY_DUMMY_SEGMENT = TRUE;
+static const gboolean EXPECT_BUGGY_DUMMY_SEGMENT = FALSE;
 
 /* An extra frame that is out-of-segment is sent after an edit. */
 static const gboolean EXPECT_SPURIOUS_EXTRA_FRAME = TRUE;
@@ -900,6 +900,48 @@ test_qtdemux_edit_lists_basic_zero_dur (TestSchedulingMode scheduling_mode,
 }
 
 void
+test_qtdemux_edit_lists_basic_empty_edit_start (TestSchedulingMode
+    scheduling_mode, MovieTemplate * movie_template)
+{
+  /* Like test_qtdemux_edit_lists_basic, but displaced +1 second in presentation */
+
+  EditListBuilder edit_list;
+  GstBuffer *movie_buffer;
+  EventList expected_events;
+  GstSegment segment;
+
+  edit_list_builder_init (&edit_list, ELST_VERSION_0);
+  edit_list_builder_add_entry (&edit_list, 30, -1, 1, 0);       /* 1 empty second */
+  edit_list_builder_add_entry (&edit_list, 60, 100, 1, 0);      /* The entire track */
+
+  movie_buffer = create_test_vector_from_template (&edit_list, movie_template);
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+  event_list_init (&expected_events);
+  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
+    event_list_add_segment (&expected_events, default_time_segment ());
+
+  if (EXPECT_EMPTY_EDIT_SEGMENTS)
+    event_list_add_segment (&expected_events, empty_segment (0, 1000000000));
+  segment.time = segment.base = 1000000000;
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2000000000));
+
+  /* *INDENT-OFF* */
+  event_list_add_buffer (&expected_events, 1000000000,  333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333,  666666666, 333333334);
+  event_list_add_buffer (&expected_events, 2000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 2666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 2333333333, 1666666666, 333333334);
+
+  /* *INDENT-ON* */
+  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
+      &expected_events);
+  gst_buffer_unref (movie_buffer);
+}
+
+void
 test_qtdemux_edit_lists_skipping (TestSchedulingMode scheduling_mode,
     MovieTemplate * movie_template)
 {
@@ -976,8 +1018,8 @@ test_qtdemux_edit_lists_skipping_non_rap (TestSchedulingMode scheduling_mode,
 }
 
 void
-test_qtdemux_edit_lists_empty_edit_start (TestSchedulingMode scheduling_mode,
-    MovieTemplate * movie_template)
+test_qtdemux_edit_lists_empty_edit_start_then_clip (TestSchedulingMode
+    scheduling_mode, MovieTemplate * movie_template)
 {
   EditListBuilder edit_list;
   GstBuffer *movie_buffer;

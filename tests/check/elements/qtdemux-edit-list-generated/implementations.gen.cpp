@@ -23,6 +23,12 @@ GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_basic_zero_dur)
 }
 GST_END_TEST;
 
+GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_basic_empty_edit_start)
+{
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PULL, &ibpibp_non_frag_template);
+}
+GST_END_TEST;
+
 GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_skipping)
 {
   test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PULL, &ibpibp_non_frag_template);
@@ -35,9 +41,9 @@ GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_skipping_non_rap)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_empty_edit_start)
+GST_START_TEST (test_qtdemux_edit_lists_non_frag_pull_empty_edit_start_then_clip)
 {
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PULL, &ibpibp_non_frag_template);
+  test_qtdemux_edit_lists_empty_edit_start_then_clip (TEST_SCHEDULING_PULL, &ibpibp_non_frag_template);
 }
 GST_END_TEST;
 
@@ -77,39 +83,9 @@ GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_basic_zero_dur)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_skipping)
+GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_basic_empty_edit_start)
 {
-  test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_skipping_non_rap)
-{
-  test_qtdemux_edit_lists_skipping_non_rap (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_empty_edit_start)
-{
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_empty_edit_middle)
-{
-  test_qtdemux_edit_lists_empty_edit_middle (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_reorder)
-{
-  test_qtdemux_edit_lists_reorder (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_repeating)
-{
-  test_qtdemux_edit_lists_repeating (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PUSH, &ibpibp_non_frag_template);
 }
 GST_END_TEST;
 
@@ -131,39 +107,9 @@ GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_basic_zero_dur)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_skipping)
+GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_basic_empty_edit_start)
 {
-  test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_skipping_non_rap)
-{
-  test_qtdemux_edit_lists_skipping_non_rap (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_empty_edit_start)
-{
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_empty_edit_middle)
-{
-  test_qtdemux_edit_lists_empty_edit_middle (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_reorder)
-{
-  test_qtdemux_edit_lists_reorder (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_non_frag_push_no_seek_repeating)
-{
-  test_qtdemux_edit_lists_repeating (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_non_frag_template);
 }
 GST_END_TEST;
 
@@ -185,6 +131,12 @@ GST_START_TEST (test_qtdemux_edit_lists_frag_pull_basic_zero_dur)
 }
 GST_END_TEST;
 
+GST_START_TEST (test_qtdemux_edit_lists_frag_pull_basic_empty_edit_start)
+{
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PULL, &ibpibp_frag_template);
+}
+GST_END_TEST;
+
 GST_START_TEST (test_qtdemux_edit_lists_frag_pull_skipping)
 {
   test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PULL, &ibpibp_frag_template);
@@ -197,9 +149,9 @@ GST_START_TEST (test_qtdemux_edit_lists_frag_pull_skipping_non_rap)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_frag_pull_empty_edit_start)
+GST_START_TEST (test_qtdemux_edit_lists_frag_pull_empty_edit_start_then_clip)
 {
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PULL, &ibpibp_frag_template);
+  test_qtdemux_edit_lists_empty_edit_start_then_clip (TEST_SCHEDULING_PULL, &ibpibp_frag_template);
 }
 GST_END_TEST;
 
@@ -239,39 +191,9 @@ GST_START_TEST (test_qtdemux_edit_lists_frag_push_basic_zero_dur)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_skipping)
+GST_START_TEST (test_qtdemux_edit_lists_frag_push_basic_empty_edit_start)
 {
-  test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_skipping_non_rap)
-{
-  test_qtdemux_edit_lists_skipping_non_rap (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_empty_edit_start)
-{
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_empty_edit_middle)
-{
-  test_qtdemux_edit_lists_empty_edit_middle (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_reorder)
-{
-  test_qtdemux_edit_lists_reorder (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_repeating)
-{
-  test_qtdemux_edit_lists_repeating (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PUSH, &ibpibp_frag_template);
 }
 GST_END_TEST;
 
@@ -293,39 +215,9 @@ GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_basic_zero_dur)
 }
 GST_END_TEST;
 
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_skipping)
+GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_basic_empty_edit_start)
 {
-  test_qtdemux_edit_lists_skipping (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_skipping_non_rap)
-{
-  test_qtdemux_edit_lists_skipping_non_rap (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_empty_edit_start)
-{
-  test_qtdemux_edit_lists_empty_edit_start (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_empty_edit_middle)
-{
-  test_qtdemux_edit_lists_empty_edit_middle (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_reorder)
-{
-  test_qtdemux_edit_lists_reorder (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
-}
-GST_END_TEST;
-
-GST_START_TEST (test_qtdemux_edit_lists_frag_push_no_seek_repeating)
-{
-  test_qtdemux_edit_lists_repeating (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
+  test_qtdemux_edit_lists_basic_empty_edit_start (TEST_SCHEDULING_PUSH_NO_SEEK, &ibpibp_frag_template);
 }
 GST_END_TEST;
 

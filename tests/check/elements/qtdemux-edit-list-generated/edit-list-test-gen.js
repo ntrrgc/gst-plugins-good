@@ -26,9 +26,10 @@ const edit_list_modes = [
     "no_edts",
     "basic",
     "basic_zero_dur",
+    "basic_empty_edit_start",
     "skipping",
     "skipping_non_rap",
-    "empty_edit_start",
+    "empty_edit_start_then_clip",
     "empty_edit_middle",
     "reorder",
     "repeating",
@@ -41,12 +42,27 @@ class Test {
         this.edit_list = edit_list;
     }
 
+    is_supported() {
+        /* Used to disable combinations that are not supported (by design). */
+
+        if (this.sched === "pull") {
+            /* All edit list types supported in pull mode, at least in theory. */
+            return true;
+        } else {
+            /* Push mode is more limited, since it needs to react to whatever it is fed.
+             * Only basic edit lists (with an optional empty edit at the start) are supported. */
+            return new Set(["no_edts", "basic", "basic_zero_dur", "basic_empty_edit_start"]).has(this.edit_list);
+        }
+    }
+
     is_currently_broken() {
-        if (this.sched !== "pull" && this.frag === "non_frag") {
+        /* Used to disable failing tests */
+        if (this.sched !== "pull" && this.frag === "frag") {
             /* edit lists are wrongly ignored in push mode for fragmented files */
             return true;
-        } else if (this.sched !== "pull") {
-            /* the last two frames are deleted in push mode even with the most basic edit list. */
+        } else if (this.sched !== "pull" && this.edit_list == "no_edts") {
+            /* in push mode, duration is not computed from the sample table, but from min(mvhd.duration, mdhd.duration),
+             * which is unreliable. In consequence, the presentation ends at PTS=2, losing the two last frames. */
             return true;
         } else if (this.edit_list === "basic_zero_dur") {
             /* when zero-duration is found, the segment end fails to account the edit start. */
@@ -54,7 +70,7 @@ class Test {
         } else if (this.frag === "frag" && (this.edit_list == "skipping" || this.edit_list == "skipping_non_rap")) {
             /* after the new second, the frame following the last frame before the edit in decoded order is wrongly emitted. */
             return true;
-        } else if (this.frag === "frag" && (this.edit_list == "empty_edit_start" || this.edit_list == "empty_edit_middle")) {
+        } else if (this.frag === "frag" && (this.edit_list == "empty_edit_start_then_clip" || this.edit_list == "empty_edit_middle")) {
             /* empty edits are being ignored in fragmented media. */
             return true;
         } else if (this.sched === "pull" && this.frag === "frag" && (this.edit_list === "reorder" || this.edit_list == "repeating")) {
@@ -92,6 +108,7 @@ for (let frag of frag_modes) {
         }
     }
 }
+tests = tests.filter(x => x.is_supported());
 
 function gen_implementations() {
     return `/*
