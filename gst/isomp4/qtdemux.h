@@ -107,10 +107,6 @@ struct _GstQTDemux {
   /* Global duration (in global timescale). Use QTTIME macros to get GstClockTime */
   guint64 duration;
 
-  /* Fragmented files may optionally use a mehd box to signal the total duration of the
-   * movie including fragments. */
-  gboolean have_mehd;
-
   /* Total size of header atoms. Used to calculate fallback overall bitrate */
   guint header_size;
 

@@ -2965,7 +2965,6 @@ qtdemux_parse_mehd (GstQTDemux * qtdemux, GstByteReader * br)
 
   GST_INFO_OBJECT (qtdemux, "mehd duration: %" G_GUINT64_FORMAT, duration);
   qtdemux->duration = duration;
-  qtdemux->have_mehd = TRUE;
 
   return TRUE;
 
@@ -9092,13 +9091,9 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
          * but, only specify media_start.*/
         stime = QTTIME_TO_GSTTIME (qtdemux, qtdemux->duration);
         if (GST_CLOCK_TIME_IS_VALID (stime) && time_valid
-            && stime >= media_start
-            && (!qtdemux->fragmented || (qtdemux->have_mehd && stime > 0))) {
-          /* we know the duration of the movie, use it to set this edit duration */
+            && stime >= media_start) {
           segment->duration = stime - media_start;
         } else {
-          /* the movie end is undefined, so is the end of this edit */
-          stime = GST_CLOCK_TIME_NONE;
           segment->duration = GST_CLOCK_TIME_NONE;
         }
       }
@@ -9108,10 +9103,7 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
       /* media_time expressed in stream timescale */
       if (time_valid) {
         segment->media_start = media_start;
-        if (segment->duration != GST_CLOCK_TIME_NONE)
-          segment->media_stop = segment->media_start + segment->duration;
-        else
-          segment->media_stop = GST_CLOCK_TIME_NONE;
+        segment->media_stop = segment->media_start + segment->duration;
         media_segments_count++;
       } else {
         segment->media_start = GST_CLOCK_TIME_NONE;
