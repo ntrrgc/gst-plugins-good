@@ -152,11 +152,14 @@ typedef struct _MovieTemplate
   GstMemory *mem;
   int free_offset;
   int free_size;
+  int mehd_offset;
+  int mehd_size;
 } MovieTemplate;
 
 static MovieTemplate ibpibp_non_frag_template =
-    { "non_frag", NULL, 0x00f8, 128 };
-static MovieTemplate ibpibp_frag_template = { "frag", NULL, 0x00f8, 128 };
+    { "non_frag", NULL, 0x00f8, 128, -1, -1 };
+static MovieTemplate ibpibp_frag_template =
+    { "frag", NULL, 0x00f8, 128, 0x03c9, 20 };
 
 #define gst_object_unref_last(x) fail_unless_equals_int(GST_OBJECT_REFCOUNT_VALUE(x), 1); gst_object_unref(x)
 
@@ -207,6 +210,33 @@ edit_list_builder_add_entry (EditListBuilder * builder,
   builder->entry_count++;
 }
 
+static void
+write_free_box (void *dst_mem, int size)
+{
+  g_assert (size >= 8);
+  GST_WRITE_UINT32_BE (dst_mem, size);  /* free box size */
+  memcpy (dst_mem + 4, "free", 4);
+  /* Fill content with zeroes */
+  memset (dst_mem + 8, '\x00', size - 8);
+}
+
+static GstMemory *
+new_free_box_memory (int size)
+{
+  GstMemory *mem;
+  GstMapInfo info;
+  int ret_map;
+
+  mem = gst_allocator_alloc (NULL, size, NULL);
+  ret_map = gst_memory_map (mem, &info, GST_MAP_WRITE);
+  g_assert (ret_map);
+
+  write_free_box (info.data, size);
+
+  gst_memory_unmap (mem, &info);
+  return mem;
+}
+
 static GstMemory *
 edit_list_builder_build_memory (const EditListBuilder * builder,
     int template_free_size)
@@ -252,13 +282,8 @@ edit_list_builder_build_memory (const EditListBuilder * builder,
   GST_WRITE_UINT32_BE (info.data + 0, offset);  /* edts size */
   GST_WRITE_UINT32_BE (info.data + 8, offset - 8);      /* elts size */
 
-  /* Write padding free box */
-  g_assert (template_free_size - offset >= 8);
-  GST_WRITE_UINT32_BE (info.data + offset, template_free_size - offset);        /* free size */
-  memcpy (info.data + offset + 4, "free", 4);
-  /* Fill content with zeroes */
-  offset += 8;
-  memset (info.data + offset, '\x00', template_free_size - offset);
+  /* Fill the remaining space with a padding `free` box */
+  write_free_box (info.data + offset, template_free_size - offset);
 
   gst_memory_unmap (mem, &info);
   return mem;
@@ -505,6 +530,28 @@ fail_if_events_not_equal (const EventList * actual, const EventList * expected)
 }
 
 static GstBuffer *
+replace_buffer_area ( /* will unref */ GstBuffer * source_buf, int offset,
+    GstMemory * replacement)
+{
+  GstBuffer *buffer;
+  int pos;
+
+  buffer =
+      gst_buffer_copy_region (source_buf, GST_BUFFER_COPY_MEMORY, 0, offset);
+
+  gst_buffer_append_memory (buffer, replacement);
+  pos = gst_buffer_get_size (buffer);
+
+  if (pos < gst_buffer_get_size (source_buf)) {
+    gst_buffer_copy_into (buffer, source_buf, GST_BUFFER_COPY_MEMORY,
+        pos, gst_buffer_get_size (source_buf) - pos);
+  }
+
+  gst_buffer_unref (source_buf);
+  return buffer;
+}
+
+static GstBuffer *
 create_test_vector_from_template (EditListBuilder * edit_list_builder,
     MovieTemplate * template)
 {
@@ -712,9 +759,8 @@ typical_segment (GstSegment * segment, guint64 start, guint64 duration)
   segment->applied_rate = 1;
   segment->rate = 1;
   segment->start = start;
-  segment->stop =
-      (duration ==
-      GST_CLOCK_TIME_NONE ? GST_CLOCK_TIME_NONE : start + duration);
+  segment->stop = (duration == GST_CLOCK_TIME_NONE
+      ? GST_CLOCK_TIME_NONE : start + duration);
   segment->duration = duration;
   segment->offset = 0;
   return segment;
@@ -769,6 +815,7 @@ default_time_segment ()
  *  - no_edts
  *  - basic
  *  - basic_zero_dur
+ *  - basic_zero_dur_no_mehd
  *  - skipping
  *  - skipping_non_rap
  *  - empty_edit_start
@@ -898,6 +945,52 @@ test_qtdemux_edit_lists_basic_zero_dur (TestSchedulingMode scheduling_mode,
 
   /* *INDENT-ON* */
   test_qtdemux_expected_events (movie_template, "basic_zero_dur",
+      scheduling_mode, movie_buffer, &expected_events);
+  gst_buffer_unref (movie_buffer);
+}
+
+
+void
+test_qtdemux_edit_lists_basic_zero_dur_no_mehd (TestSchedulingMode
+    scheduling_mode, MovieTemplate * movie_template)
+{
+  EditListBuilder edit_list;
+  GstBuffer *movie_buffer;
+  EventList expected_events;
+  GstSegment segment;
+
+  edit_list_builder_init (&edit_list, ELST_VERSION_0);
+  /* duration=0 must be interpreted as "until the end of the track".
+   * This test case must produce the same frames as test_qtdemux_edit_lists_basic. */
+  edit_list_builder_add_entry (&edit_list, 0, 100, 1, 0);
+
+  movie_buffer = create_test_vector_from_template (&edit_list, movie_template);
+
+  /* This test should only be run with fragmented files. */
+  g_assert (movie_template->mehd_offset != -1
+      && movie_template->mehd_size != -1);
+  movie_buffer =
+      replace_buffer_area (movie_buffer, movie_template->mehd_offset,
+      new_free_box_memory (movie_template->mehd_size));
+
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+  event_list_init (&expected_events);
+  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
+    event_list_add_segment (&expected_events, default_time_segment ());
+
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, GST_CLOCK_TIME_NONE));
+
+  /* *INDENT-OFF* */
+  event_list_add_buffer (&expected_events,          0,  333333333, 333333333);
+  event_list_add_buffer (&expected_events,  666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events,  333333333,  666666666, 333333334);
+  event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
+
+  /* *INDENT-ON* */
+  test_qtdemux_expected_events (movie_template, "basic_zero_dur_no_mehd",
       scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
