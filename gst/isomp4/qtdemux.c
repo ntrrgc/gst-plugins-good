@@ -9078,7 +9078,7 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
     for (i = 0; i < n_segments; i++) {
       guint64 duration;
       guint64 media_time;
-      gboolean time_valid = TRUE;
+      gboolean empty_edit = FALSE;
       QtDemuxSegment *segment;
       guint32 rate_int;
       GstClockTime media_start = GST_CLOCK_TIME_NONE;
@@ -9087,15 +9087,15 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
         media_time = QT_UINT64 (buffer + 8);
         duration = QT_UINT64 (buffer);
         if (media_time == G_MAXUINT64)
-          time_valid = FALSE;
+          empty_edit = TRUE;
       } else {
         media_time = QT_UINT32 (buffer + 4);
         duration = QT_UINT32 (buffer);
         if (media_time == G_MAXUINT32)
-          time_valid = FALSE;
+          empty_edit = TRUE;
       }
 
-      if (time_valid)
+      if (!empty_edit)
         media_start = QTSTREAMTIME_TO_GSTTIME (stream, media_time);
 
       segment = &stream->segments[count++];
@@ -9118,7 +9118,7 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
 
       segment->trak_media_start = media_time;
       /* media_time expressed in stream timescale */
-      if (time_valid) {
+      if (!empty_edit) {
         segment->media_start = media_start;
         segment->media_stop = GST_CLOCK_TIME_IS_VALID (segment->duration)
             ? segment->media_start + segment->duration : GST_CLOCK_TIME_NONE;
