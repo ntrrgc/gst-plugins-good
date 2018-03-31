@@ -148,13 +148,15 @@ GST_END_TEST;
 
 typedef struct _MovieTemplate
 {
+  const char *name;
   GstMemory *mem;
   int free_offset;
   int free_size;
 } MovieTemplate;
 
-static MovieTemplate ibpibp_non_frag_template = { NULL, 0x00f8, 128 };
-static MovieTemplate ibpibp_frag_template = { NULL, 0x00f8, 128 };
+static MovieTemplate ibpibp_non_frag_template =
+    { "non_frag", NULL, 0x00f8, 128 };
+static MovieTemplate ibpibp_frag_template = { "frag", NULL, 0x00f8, 128 };
 
 #define gst_object_unref_last(x) fail_unless_equals_int(GST_OBJECT_REFCOUNT_VALUE(x), 1); gst_object_unref(x)
 
@@ -536,21 +538,19 @@ read_file_to_memory (const gchar * test_filename)
 }
 
 static char *
-write_temp_file (GstBuffer * movie_buffer)
+write_temp_file (const char *template_name, const char *variant_name,
+    GstBuffer * movie_buffer)
 {
   gchar *file_path;
   GError *error = NULL;
   gint fd;
   int i;
 
-  fd = g_file_open_tmp ("qtdemux-test-XXXXXX", &file_path, &error);
-  g_assert_no_error (error);
-  /* Hint: alternatively, uncomment the following for easier debugging,
-   * at the cost of not being able to run two instances of the tests in
-   * parallel: */
-  /* file_path = g_strdup("/tmp/qtdemux-test.mp4"); */
-  /* fd = open(file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644); */
-  /* g_assert(fd != -1); */
+  file_path =
+      g_strdup_printf ("%s" G_DIR_SEPARATOR_S "qtdemux-test-%s-%s.mp4",
+      g_get_tmp_dir (), template_name, variant_name);
+  fd = g_open (file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  g_assert (fd != -1);
 
   for (i = 0; i < gst_buffer_n_memory (movie_buffer); i++) {
     GstMemory *mem;
@@ -560,7 +560,8 @@ write_temp_file (GstBuffer * movie_buffer)
     write (fd, info.data, info.size);
   }
 
-  close (fd);
+  g_close (fd, &error);
+  g_assert_no_error (error);
   return file_path;
 }
 
@@ -586,7 +587,8 @@ no_seek_probe (GstPad * pad, GstPadProbeInfo * info, gpointer user_data)
 }
 
 static void
-test_qtdemux_expected_events (TestSchedulingMode scheduling_mode,
+test_qtdemux_expected_events (const MovieTemplate * movie_template,
+    const char *variant_name, TestSchedulingMode scheduling_mode,
     GstBuffer * movie_buffer, EventList * expected_events)
 {
   GstElement *pipeline;
@@ -604,7 +606,8 @@ test_qtdemux_expected_events (TestSchedulingMode scheduling_mode,
 
   event_list_init (&actual_events);
   event_writer_init (&event_writer, &actual_events);
-  movie_buffer_file_path = write_temp_file (movie_buffer);
+  movie_buffer_file_path =
+      write_temp_file (movie_template->name, variant_name, movie_buffer);
 
   if (scheduling_mode == TEST_SCHEDULING_PULL)
     pipeline =
@@ -822,8 +825,8 @@ test_qtdemux_edit_lists_no_edts (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events, 1666666666, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "no_edts", scheduling_mode,
+      movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -856,8 +859,8 @@ test_qtdemux_edit_lists_basic (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "basic", scheduling_mode,
+      movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -894,8 +897,8 @@ test_qtdemux_edit_lists_basic_zero_dur (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "basic_zero_dur",
+      scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -936,8 +939,8 @@ test_qtdemux_edit_lists_basic_empty_edit_start (TestSchedulingMode
   event_list_add_buffer (&expected_events, 2333333333, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "basic_empty_edit_start",
+      scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -973,8 +976,8 @@ test_qtdemux_edit_lists_skipping (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events,  666666666, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "skipping", scheduling_mode,
+      movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -1012,8 +1015,8 @@ test_qtdemux_edit_lists_skipping_non_rap (TestSchedulingMode scheduling_mode,
     event_list_add_buffer (&expected_events,         -1, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "skipping_non_rap",
+      scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -1046,8 +1049,8 @@ test_qtdemux_edit_lists_empty_edit_start_then_clip (TestSchedulingMode
   if (EXPECT_SPURIOUS_EXTRA_FRAME)
     event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
 
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "empty_edit_start_then_clip",
+      scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -1090,8 +1093,8 @@ test_qtdemux_edit_lists_empty_edit_middle (TestSchedulingMode scheduling_mode,
   if (EXPECT_SPURIOUS_EXTRA_FRAME)
     event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
 
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "empty_edit_middle",
+      scheduling_mode, movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -1131,8 +1134,8 @@ test_qtdemux_edit_lists_reorder (TestSchedulingMode scheduling_mode,
     event_list_add_buffer (&expected_events, 2000000000, 1333333333, 333333333);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "reorder", scheduling_mode,
+      movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
@@ -1168,8 +1171,8 @@ test_qtdemux_edit_lists_repeating (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
 
   /* *INDENT-ON* */
-  test_qtdemux_expected_events (scheduling_mode, movie_buffer,
-      &expected_events);
+  test_qtdemux_expected_events (movie_template, "repeating", scheduling_mode,
+      movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
 }
 
