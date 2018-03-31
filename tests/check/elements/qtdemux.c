@@ -827,9 +827,6 @@ default_time_segment ()
 /* Workarounds for gst behaviors that don't make sense but are not severe enough to consider a test as a failure:
  * If any of these behaviors is fixed, update the constant before running the tests. */
 
-/* In push mode a dummy default segment is sent before the first, useful one. */
-static const gboolean EXPECT_BUGGY_DUMMY_SEGMENT = FALSE;
-
 /* An extra frame that is out-of-segment is sent after an edit. */
 static const gboolean EXPECT_SPURIOUS_EXTRA_FRAME = TRUE;
 
@@ -893,8 +890,6 @@ test_qtdemux_edit_lists_basic (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   /* *INDENT-OFF* */
   event_list_add_segment (&expected_events, typical_segment (&segment, 333333333, 2 * GST_SECOND));
@@ -929,8 +924,6 @@ test_qtdemux_edit_lists_basic_zero_dur (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   event_list_add_segment (&expected_events, typical_segment (&segment,
           333333333, 2 * GST_SECOND));
@@ -975,8 +968,6 @@ test_qtdemux_edit_lists_basic_zero_dur_no_mehd (TestSchedulingMode
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   event_list_add_segment (&expected_events, typical_segment (&segment,
           333333333, GST_CLOCK_TIME_NONE));
@@ -1014,8 +1005,6 @@ test_qtdemux_edit_lists_basic_empty_edit_start (TestSchedulingMode
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   if (EXPECT_EMPTY_EDIT_SEGMENTS)
     event_list_add_segment (&expected_events, empty_segment (0, 1000000000));
@@ -1054,8 +1043,6 @@ test_qtdemux_edit_lists_skipping (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   /* *INDENT-OFF* */
   event_list_add_segment (&expected_events, typical_segment (&segment, 333333333, 333333333));
@@ -1091,8 +1078,6 @@ test_qtdemux_edit_lists_skipping_non_rap (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   event_list_add_segment (&expected_events, typical_segment (&segment,
           333333333, 333333333));
@@ -1130,8 +1115,6 @@ test_qtdemux_edit_lists_empty_edit_start_then_clip (TestSchedulingMode
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   if (EXPECT_EMPTY_EDIT_SEGMENTS)
     event_list_add_segment (&expected_events, empty_segment (0, 1000000000));
@@ -1165,8 +1148,6 @@ test_qtdemux_edit_lists_empty_edit_middle (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   event_list_add_segment (&expected_events, typical_segment (&segment,
           333333333, 333333333));
@@ -1208,8 +1189,6 @@ test_qtdemux_edit_lists_reorder (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   event_list_add_segment (&expected_events, typical_segment (&segment,
           1333333333, 1000000000));
@@ -1249,8 +1228,6 @@ test_qtdemux_edit_lists_repeating (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
   /* *INDENT-OFF* */
   event_list_add_segment (&expected_events, typical_segment (&segment, 1333333333, 1000000000));
