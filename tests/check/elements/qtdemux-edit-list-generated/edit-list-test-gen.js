@@ -64,11 +64,7 @@ class Test {
     is_currently_broken() {
         /* Used to disable failing tests */
 
-        if (this.sched !== "pull" && this.edit_list == "no_edts") {
-            /* in push mode, duration is not computed from the sample table, but from min(mvhd.duration, mdhd.duration),
-             * which is unreliable. In consequence, the presentation ends at PTS=2, losing the two last frames. */
-            return true;
-        } else if (this.frag === "frag" && (this.edit_list == "skipping" || this.edit_list == "skipping_non_rap")) {
+        if (this.frag === "frag" && (this.edit_list == "skipping" || this.edit_list == "skipping_non_rap")) {
             /* after the new second, the frame following the last frame before the edit in decoded order is wrongly emitted. */
             return true;
         } else if (this.frag === "frag" && (this.edit_list == "empty_edit_start_then_clip" || this.edit_list == "empty_edit_middle")) {

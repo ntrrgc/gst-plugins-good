@@ -26,13 +26,13 @@ tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_pull_reorder);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_pull_repeating);
 
-tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_no_edts);
+tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_no_edts);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_basic_zero_dur);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_basic_empty_edit_start);
 
-tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_no_seek_no_edts);
+tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_no_seek_no_edts);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_non_frag_push_no_seek_basic_zero_dur);
 
@@ -60,7 +60,7 @@ tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_frag_pull_reorder);
 
 tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_frag_pull_repeating);
 
-tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_frag_push_no_edts);
+tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_no_edts);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_basic_zero_dur);
 
@@ -68,7 +68,7 @@ tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_basic_zero_dur_no_me
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_basic_empty_edit_start);
 
-tcase_skip_failing_test (tc_chain, test_qtdemux_edit_lists_frag_push_no_seek_no_edts);
+tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_no_seek_no_edts);
 
 tcase_add_test (tc_chain, test_qtdemux_edit_lists_frag_push_no_seek_basic_zero_dur);
 

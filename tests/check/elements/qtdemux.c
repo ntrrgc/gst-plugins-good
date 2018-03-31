@@ -780,18 +780,6 @@ empty_segment (guint64 start, guint64 duration)
   return &segment;
 }
 
-static GstSegment *
-default_time_segment ()
-{
-  static GstSegment segment;
-  static gboolean initialized = FALSE;
-
-  if (!initialized) {
-    gst_segment_init (&segment, GST_FORMAT_TIME);
-  }
-  return &segment;
-}
-
 /* Edit list template files have:
  *   Frame rate       = 1/3
  *   Movie timescale  = 1/30
@@ -824,14 +812,32 @@ default_time_segment ()
  *  - repeating
  */
 
-/* Workarounds for gst behaviors that don't make sense but are not severe enough to consider a test as a failure:
- * If any of these behaviors is fixed, update the constant before running the tests. */
+/* Workarounds for gst behaviors that don't make sense but are not severe enough
+ * to consider a test as a failure:
+ * If any of these behaviors is fixed, update the constant before running the
+ * tests. */
 
-/* An extra frame that is out-of-segment is sent after an edit. */
-static const gboolean EXPECT_SPURIOUS_EXTRA_FRAME = TRUE;
+/* In pull mode (the only mode where complex edit lists work to some extent),
+ * the condition to check if a frame is outside the current edit is:
+ *
+ *   QTSAMPLE_DTS (stream, sample) >= segment->media_stop`
+ *
+ * That is wrong because it's comparing DTS with PTS (`segment->media_stop`).
+ * In consequence, often one or two extra frames that are out-of-segment are
+ * sent before the new GstSegment. */
+static const gboolean EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS = TRUE;
 
-/* Empty edits generate unnecessary GstSegments. Their start and stop properties refer to stream time, not buffer time. */
+/* Empty edits generate unnecessary GstSegments. Their start and stop properties
+ * refer to stream time, not buffer time. */
 static const gboolean EXPECT_EMPTY_EDIT_SEGMENTS = TRUE;
+
+/* In abscence of edit lists, qtdemux clips the movie to min(mvhd.duration,
+ * mdhd.duration) + mehd.fragment_duration.
+ * This is arguably a bad idea. If the author really intended to clip the movie,
+ * they would have used an edit list. The actual duration for should not be
+ * assumed from these fields (which are optional and unreliable) and instead
+ * be calculated from the sample tables when possible. */
+static const gboolean EXPECT_CLIPPING_TO_MOVIE_DURATION = TRUE;
 
 void
 test_qtdemux_edit_lists_no_edts (TestSchedulingMode scheduling_mode,
@@ -847,28 +853,30 @@ test_qtdemux_edit_lists_no_edts (TestSchedulingMode scheduling_mode,
 
   gst_segment_init (&segment, GST_FORMAT_TIME);
   event_list_init (&expected_events);
-  if (scheduling_mode != TEST_SCHEDULING_PULL && EXPECT_BUGGY_DUMMY_SEGMENT)
-    event_list_add_segment (&expected_events, default_time_segment ());
 
-  /* Bug workaround: the end of the segment should actually be 2333333333.
-   * When there is no edit list, qtdemux takes 2 seconds from the mhvd duration
-   * field, but that field is not reliable: it is optional and the spec does
-   * not specify whether that duration includes the first few moments in track
-   * time which have no presentation. Instead, it would be more reliable to
-   * compute the duration from the sample index, as ffmpeg does.
-   * The generated test cases don't update this field. */
-  event_list_add_segment (&expected_events, typical_segment (&segment, 0,
-          2000000000));
+  if (EXPECT_CLIPPING_TO_MOVIE_DURATION) {
+    /* Bug workaround: the end of the segment should actually be 2333333333.
+     * When there is no edit list, qtdemux takes 2 seconds from the mhvd duration
+     * field, but that field is not reliable: it is optional and the spec does
+     * not specify whether that duration includes the first few moments in track
+     * time which have no presentation. Instead, it would be more reliable to
+     * compute the duration from the sample index, as ffmpeg does.
+     * The generated test cases don't update this field. */
+    event_list_add_segment (&expected_events, typical_segment (&segment, 0,
+            2000000000));
+  }
 
-  /* *INDENT-OFF* */
-  event_list_add_buffer (&expected_events,  333333333,  333333333, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 333333333, 333333333);
   event_list_add_buffer (&expected_events, 1000000000, 1000000000, 333333333);
-  event_list_add_buffer (&expected_events,  666666666,  666666666, 333333334);
+  event_list_add_buffer (&expected_events, 666666666, 666666666, 333333334);
   event_list_add_buffer (&expected_events, 1333333333, 1333333333, 333333333);
-  event_list_add_buffer (&expected_events, 2000000000, 2000000000, 333333333);
-  event_list_add_buffer (&expected_events, 1666666666, 1666666666, 333333334);
+  if (EXPECT_CLIPPING_TO_MOVIE_DURATION &&
+      (scheduling_mode == TEST_SCHEDULING_PULL &&
+          EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)) {
+    event_list_add_buffer (&expected_events, 2000000000, 2000000000, 333333333);
+    event_list_add_buffer (&expected_events, 1666666666, 1666666666, 333333334);
+  }
 
-  /* *INDENT-ON* */
   test_qtdemux_expected_events (movie_template, "no_edts", scheduling_mode,
       movie_buffer, &expected_events);
   gst_buffer_unref (movie_buffer);
@@ -1047,7 +1055,7 @@ test_qtdemux_edit_lists_skipping (TestSchedulingMode scheduling_mode,
   /* *INDENT-OFF* */
   event_list_add_segment (&expected_events, typical_segment (&segment, 333333333, 333333333));
   event_list_add_buffer (&expected_events,          0,  333333333, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events,  666666667, 1000000000, 333333333);
 
   event_list_add_segment (&expected_events, typical_segment (&segment, 1333333333, 666666667));
@@ -1084,12 +1092,12 @@ test_qtdemux_edit_lists_skipping_non_rap (TestSchedulingMode scheduling_mode,
 
   /* *INDENT-OFF* */
   event_list_add_buffer (&expected_events,          0,  333333333, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events,  666666667, 1000000000, 333333333);
   event_list_add_segment (&expected_events, typical_segment (&segment, 2000000000, 333333333));
   event_list_add_buffer (&expected_events, -333333334, 1333333333, 333333333);
   event_list_add_buffer (&expected_events,  333333333, 2000000000, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events,         -1, 1666666666, 333333334);
 
   /* *INDENT-ON* */
@@ -1122,7 +1130,7 @@ test_qtdemux_edit_lists_empty_edit_start_then_clip (TestSchedulingMode
   event_list_add_segment (&expected_events, typical_segment (&segment,
           1333333333, 333333333));
   event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
 
   test_qtdemux_expected_events (movie_template, "empty_edit_start_then_clip",
@@ -1152,7 +1160,7 @@ test_qtdemux_edit_lists_empty_edit_middle (TestSchedulingMode scheduling_mode,
   event_list_add_segment (&expected_events, typical_segment (&segment,
           333333333, 333333333));
   event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
 
   if (EXPECT_EMPTY_EDIT_SEGMENTS)
@@ -1164,7 +1172,7 @@ test_qtdemux_edit_lists_empty_edit_middle (TestSchedulingMode scheduling_mode,
   event_list_add_segment (&expected_events, typical_segment (&segment,
           1333333333, 333333333));
   event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
 
   test_qtdemux_expected_events (movie_template, "empty_edit_middle",
@@ -1202,7 +1210,7 @@ test_qtdemux_edit_lists_reorder (TestSchedulingMode scheduling_mode,
   event_list_add_buffer (&expected_events, 1000000000,  333333333, 333333333);
   event_list_add_buffer (&expected_events, 1666666667, 1000000000, 333333333);
   event_list_add_buffer (&expected_events, 1333333333,  666666666, 333333334);
-  if (EXPECT_SPURIOUS_EXTRA_FRAME)
+  if (EXPECT_BOGUS_SEGMENT_BOUNDS_CHECKS)
     event_list_add_buffer (&expected_events, 2000000000, 1333333333, 333333333);
 
   /* *INDENT-ON* */
