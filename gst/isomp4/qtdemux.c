@@ -9067,20 +9067,16 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
       /* time and duration expressed in global timescale */
       segment->time = stime;
       /* add non scaled values so we don't cause roundoff errors */
-      if (duration || media_start == GST_CLOCK_TIME_NONE) {
+      if (duration > 0 || media_start == GST_CLOCK_TIME_NONE) {
         time += duration;
         stime = QTTIME_TO_GSTTIME (qtdemux, time);
         segment->duration = stime - segment->time;
       } else {
         /* zero duration does not imply media_start == media_stop
-         * but, only specify media_start.*/
-        stime = QTTIME_TO_GSTTIME (qtdemux, qtdemux->duration);
-        if (GST_CLOCK_TIME_IS_VALID (stime) && time_valid
-            && stime >= media_start) {
-          segment->duration = stime - media_start;
-        } else {
-          segment->duration = GST_CLOCK_TIME_NONE;
-        }
+         * but, only specify media_start. The edit ends with the track. */
+        stime = segment->duration = GST_CLOCK_TIME_NONE;
+        /* No more edits are allowed after this one. */
+        n_segments = segment_number + 1;
       }
       segment->stop_time = stime;
 
@@ -9088,7 +9084,8 @@ qtdemux_parse_segments (GstQTDemux * qtdemux, QtDemuxStream * stream,
       /* media_time expressed in stream timescale */
       if (time_valid) {
         segment->media_start = media_start;
-        segment->media_stop = segment->media_start + segment->duration;
+        segment->media_stop = GST_CLOCK_TIME_IS_VALID (segment->duration)
+            ? segment->media_start + segment->duration : GST_CLOCK_TIME_NONE;
         media_segments_count++;
       } else {
         segment->media_start = GST_CLOCK_TIME_NONE;
