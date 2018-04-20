@@ -28,6 +28,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <gst/app/app.h>
+#include <pthread.h>
 
 typedef struct
 {
@@ -145,6 +147,10 @@ GST_START_TEST (test_qtdemux_input_gap)
 }
 
 GST_END_TEST;
+
+/*
+ * EDIT LISTS TESTS
+ */
 
 typedef struct _MovieTemplate
 {
@@ -1259,8 +1265,550 @@ test_qtdemux_edit_lists_repeating (TestSchedulingMode scheduling_mode,
   gst_buffer_unref (movie_buffer);
 }
 
-
 #include "qtdemux-edit-list-generated/implementations.gen.c"
+
+/*
+ * Fragments tests
+ */
+
+typedef struct _FragmentPointer
+{
+  /* Fragment offsets as specified in a MPD file. */
+  int offset_start;             /* offset of first byte */
+  int offset_last;              /* offset of last byte */
+} FragmentPointer;
+
+typedef struct _DashMovie
+{
+  GstBuffer *movie_buffer;
+  unsigned int n_fragments;
+  FragmentPointer fragments[2];
+} DashMovie;
+
+static DashMovie ibpibp_dash_movie = { NULL, 2, {
+        {995, 2641},
+        {2642, 4000}
+    }
+};
+
+static void
+load_fragments_files (void)
+{
+  GstMemory *mem;
+  GstBuffer *buf;
+  mem = read_file_to_memory ("ibpibp-dash.mp4");
+  buf = gst_buffer_new ();
+  gst_buffer_append_memory (buf, mem);
+  ibpibp_dash_movie.movie_buffer = buf;
+}
+
+typedef struct _Barrier
+{
+  pthread_cond_t cond;
+  pthread_mutex_t mutex;
+  gboolean lifted;
+  gboolean errored;
+} Barrier;
+
+static void
+barrier_init (Barrier * barrier)
+{
+  int ret;
+  ret = pthread_mutex_init (&barrier->mutex, NULL);
+  g_assert (ret == 0);
+  ret = pthread_cond_init (&barrier->cond, NULL);
+  g_assert (ret == 0);
+  barrier->lifted = FALSE;
+  barrier->errored = FALSE;
+}
+
+static void
+barrier_tear_down (Barrier * barrier)
+{
+  int ret;
+  ret = pthread_mutex_destroy (&barrier->mutex);
+  g_assert (ret == 0);
+  ret = pthread_cond_destroy (&barrier->cond);
+  g_assert (ret == 0);
+}
+
+static void
+barrier_wait (Barrier * barrier)
+{
+  pthread_mutex_lock (&barrier->mutex);
+  while (!(barrier->lifted || barrier->errored)) {
+    pthread_cond_wait (&barrier->cond, &barrier->mutex);
+  }
+  if (barrier->errored) {
+    /* Error in the background thread. No need to print it, it has already been
+     * printed by the sync bus error handler. */
+    g_assert_not_reached ();
+  }
+
+  /* Reset the barrier so that it can be reused. */
+  barrier->lifted = FALSE;
+  pthread_mutex_unlock (&barrier->mutex);
+}
+
+static void
+barrier_lift (Barrier * barrier)
+{
+  pthread_mutex_lock (&barrier->mutex);
+  barrier->lifted = TRUE;
+  pthread_cond_broadcast (&barrier->cond);
+  pthread_mutex_unlock (&barrier->mutex);
+}
+
+static void
+barrier_signal_error (Barrier * barrier)
+{
+  pthread_mutex_lock (&barrier->mutex);
+  barrier->errored = TRUE;
+  pthread_cond_broadcast (&barrier->cond);
+  pthread_mutex_unlock (&barrier->mutex);
+}
+
+static GstPadProbeReturn
+lift_barrier_on_empty_buffer (GstPad * pad, GstPadProbeInfo * info,
+    void *userdata)
+{
+  Barrier *barrier = (Barrier *) userdata;
+  GstBuffer *buffer;
+
+  if (!(info->type & GST_PAD_PROBE_TYPE_BUFFER))
+    return GST_PAD_PROBE_OK;
+
+  buffer = info->data;
+  if (gst_buffer_n_memory (buffer) == 0) {
+    barrier_lift (barrier);
+    return GST_PAD_PROBE_REMOVE;
+  }
+
+  return GST_PAD_PROBE_OK;
+}
+
+typedef struct _QtDemuxFragmentTester
+{
+  EventList event_list;
+  EventWriter event_writer;
+  GstElement *pipeline;
+  GstAppSrc *appsrc;
+  Barrier barrier;
+} QtDemuxFragmentTester;
+
+static void
+qtdemux_fragment_tester_error_handler (GstBus * bus, GstMessage * message,
+    void *userdata);
+
+static QtDemuxFragmentTester *
+qtdemux_fragment_tester_new (void)
+{
+  QtDemuxFragmentTester *tester;
+  GError *error = NULL;
+  GstStateChangeReturn state_change_ret;
+  GstElement *fakesink;
+  GstPad *fakesink_pad;
+  GstBus *bus;
+
+  tester = g_new (QtDemuxFragmentTester, 1);
+
+  event_list_init (&tester->event_list);
+  event_writer_init (&tester->event_writer, &tester->event_list);
+  barrier_init (&tester->barrier);
+
+  tester->pipeline =
+      gst_parse_launch
+      ("appsrc name=appsrc ! qtdemux ! fakesink sync=false async=false name=fakesink",
+      &error);
+  g_assert_no_error (error);
+
+  bus = gst_pipeline_get_bus (GST_PIPELINE (tester->pipeline));
+  gst_bus_enable_sync_message_emission (bus);
+  g_signal_connect (bus, "sync-message::error",
+      G_CALLBACK (qtdemux_fragment_tester_error_handler), tester);
+
+  tester->appsrc =
+      GST_APP_SRC (gst_bin_get_by_name (GST_BIN (tester->pipeline), "appsrc"));
+  g_assert_nonnull (tester->appsrc);
+
+  fakesink = gst_bin_get_by_name (GST_BIN (tester->pipeline), "fakesink");
+  fakesink_pad = gst_element_get_static_pad (fakesink, "sink");
+  g_assert (fakesink_pad);
+  gst_pad_add_probe (fakesink_pad,
+      GST_PAD_PROBE_TYPE_BUFFER | GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+      event_writer_probe, &tester->event_writer, NULL);
+
+  state_change_ret =
+      gst_element_set_state (tester->pipeline, GST_STATE_PLAYING);
+  fail_unless_equals_int (state_change_ret, GST_STATE_CHANGE_SUCCESS);
+
+  g_object_unref (fakesink_pad);
+  g_object_unref (fakesink);
+  g_object_unref (bus);
+  return tester;
+}
+
+static void
+qtdemux_fragment_tester_destroy (QtDemuxFragmentTester * tester)
+{
+  GstStateChangeReturn state_change_ret;
+
+  state_change_ret = gst_element_set_state (tester->pipeline, GST_STATE_NULL);
+  fail_unless_equals_int (state_change_ret, GST_STATE_CHANGE_SUCCESS);
+
+  g_object_unref (tester->appsrc);
+  g_object_unref (tester->pipeline);
+  barrier_tear_down (&tester->barrier);
+
+  g_free (tester);
+}
+
+static void
+qtdemux_fragment_tester_error_handler (GstBus * bus, GstMessage * msg,
+    void *userdata)
+{
+  QtDemuxFragmentTester *tester;
+  GError *err = NULL;
+  gchar *dbg_info = NULL;
+
+  gst_message_parse_error (msg, &err, &dbg_info);
+  g_printerr ("ERROR from element %s: %s\n",
+      GST_OBJECT_NAME (msg->src), err->message);
+  g_printerr ("Debugging info: %s\n", (dbg_info) ? dbg_info : "none");
+  g_error_free (err);
+  g_free (dbg_info);
+
+  tester = (QtDemuxFragmentTester *) userdata;
+  barrier_signal_error (&tester->barrier);
+}
+
+static void
+qtdemux_fragment_tester_wait_drained (QtDemuxFragmentTester * tester)
+{
+  GstPad *appsrc_pad;
+
+  appsrc_pad = gst_element_get_static_pad (GST_ELEMENT (tester->appsrc), "src");
+  g_assert_nonnull (appsrc_pad);
+  gst_pad_add_probe (appsrc_pad, GST_PAD_PROBE_TYPE_BUFFER,
+      lift_barrier_on_empty_buffer, &tester->barrier, NULL);
+
+  gst_app_src_push_buffer (tester->appsrc, gst_buffer_new ());
+  barrier_wait (&tester->barrier);
+
+  g_object_unref (appsrc_pad);
+}
+
+static void
+qtdemux_fragment_tester_feed_and_wait (QtDemuxFragmentTester * tester,
+    /* transfer full */ GstBuffer * buffer)
+{
+  gst_app_src_push_buffer (tester->appsrc, buffer);
+  qtdemux_fragment_tester_wait_drained (tester);
+}
+
+static void
+qtdemux_fragment_tester_mse_flush (QtDemuxFragmentTester * tester)
+{
+  GstEvent *flush_stop;
+  GstStructure *structure;
+
+  if (!gst_element_send_event (GST_ELEMENT (tester->pipeline),
+          gst_event_new_flush_start ())) {
+    GST_ERROR ("Failed to send flush-start");
+    g_assert_not_reached ();
+  }
+
+  flush_stop = gst_event_make_writable (gst_event_new_flush_stop (TRUE));
+  structure = gst_event_writable_structure (flush_stop);
+  gst_structure_set (structure, "media_source_extensions_flush", G_TYPE_BOOLEAN,
+      TRUE, NULL);
+  if (!gst_element_send_event (GST_ELEMENT (tester->pipeline), flush_stop)) {
+    GST_ERROR ("Failed to send flush-stop");
+    g_assert_not_reached ();
+  }
+
+  qtdemux_fragment_tester_wait_drained (tester);
+}
+
+static GstBuffer *
+new_initialization_segment (DashMovie * dash_movie)
+{
+  return gst_buffer_copy_region (dash_movie->movie_buffer, GST_BUFFER_COPY_ALL,
+      0, dash_movie->fragments[0].offset_start);
+}
+
+static GstBuffer *
+new_fragment_buffer (DashMovie * dash_movie, int fragment_index)
+{
+  FragmentPointer *frag = &dash_movie->fragments[fragment_index];
+  return gst_buffer_copy_region (dash_movie->movie_buffer, GST_BUFFER_COPY_ALL,
+      frag->offset_start, frag->offset_last - frag->offset_start + 1);
+}
+
+static GstBuffer *
+crop_buffer (GstBuffer * buf, gsize size)
+{
+  GstBuffer *ret;
+  g_assert (size < gst_buffer_get_size (buf));
+  ret = gst_buffer_copy_region (buf, GST_BUFFER_COPY_ALL, 0, size);
+  gst_buffer_unref (buf);
+  return ret;
+}
+
+GST_START_TEST (test_qtdemux_fragments_sequential_order)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 1));
+  event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_reverse_order)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 1));
+  event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_flush_before_init)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_mse_flush (tester);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_flush_during_init)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      crop_buffer (new_initialization_segment (dash_movie), 400));
+  qtdemux_fragment_tester_mse_flush (tester);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_flush_between_frags)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_mse_flush (tester);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 1));
+  event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_flush_before_frag)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_mse_flush (tester);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_qtdemux_fragments_flush_during_frag)
+{
+  DashMovie *dash_movie;
+  QtDemuxFragmentTester *tester;
+  EventList expected_events;
+  GstSegment segment;
+
+  dash_movie = &ibpibp_dash_movie;
+  tester = qtdemux_fragment_tester_new ();
+  event_list_init (&expected_events);
+  gst_segment_init (&segment, GST_FORMAT_TIME);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_initialization_segment (dash_movie));
+  event_list_add_segment (&expected_events, typical_segment (&segment,
+          333333333, 2 * GST_SECOND));
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      crop_buffer (new_fragment_buffer (dash_movie, 0), 1500));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_mse_flush (tester);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 0));
+  event_list_add_buffer (&expected_events, 0, 333333333, 333333333);
+  event_list_add_buffer (&expected_events, 666666667, 1000000000, 333333333);
+  event_list_add_buffer (&expected_events, 333333333, 666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_feed_and_wait (tester,
+      new_fragment_buffer (dash_movie, 1));
+  event_list_add_buffer (&expected_events, 1000000000, 1333333333, 333333333);
+  event_list_add_buffer (&expected_events, 1666666667, 2000000000, 333333333);
+  event_list_add_buffer (&expected_events, 1333333333, 1666666666, 333333334);
+  fail_if_events_not_equal (&tester->event_list, &expected_events);
+
+  qtdemux_fragment_tester_destroy (tester);
+}
+
+GST_END_TEST;
 
 /** Use this macro instead of just commenting out failing tests in order to avoid compiler warnings */
 #define tcase_skip_failing_test(tc_chain, test) (void)tc_chain; (void) test
@@ -1279,6 +1827,17 @@ qtdemux_suite (void)
   suite_add_tcase (s, tc_chain);
 
 #include "qtdemux-edit-list-generated/calls.gen.c"
+
+  load_fragments_files ();
+  tc_chain = tcase_create ("fragments");
+  tcase_add_test (tc_chain, test_qtdemux_fragments_sequential_order);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_reverse_order);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_flush_before_init);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_flush_during_init);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_flush_between_frags);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_flush_before_frag);
+  tcase_add_test (tc_chain, test_qtdemux_fragments_flush_during_frag);
+  suite_add_tcase (s, tc_chain);
 
   return s;
 }
