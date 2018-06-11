@@ -351,7 +351,6 @@ struct _QtDemuxStream
   guint32 segment_index;
   guint32 sample_index;
   GstClockTime time_position;   /* in gst time */
-  guint64 accumulated_base;
 
   /* the Gst segment we are processing out, used for clipping */
   GstSegment segment;
@@ -1567,7 +1566,6 @@ gst_qtdemux_perform_seek (GstQTDemux * qtdemux, GstSegment * segment,
     QtDemuxStream *stream = QTDEMUX_STREAM (iter->data);
 
     stream->time_position = desired_offset;
-    stream->accumulated_base = 0;
     stream->sample_index = -1;
     stream->offset_in_sample = 0;
     stream->segment_index = -1;
@@ -2210,7 +2208,6 @@ gst_qtdemux_reset (GstQTDemux * qtdemux, gboolean hard)
       QtDemuxStream *stream = QTDEMUX_STREAM (iter->data);
       stream->sent_eos = FALSE;
       stream->time_position = 0;
-      stream->accumulated_base = 0;
     }
   }
 }
@@ -2246,11 +2243,6 @@ gst_qtdemux_map_and_push_segments (GstQTDemux * qtdemux, GstSegment * segment)
           gst_qtdemux_send_gap_for_segment (qtdemux, stream, i,
               stream->time_position);
 
-          /* accumulate previous segments */
-          if (GST_CLOCK_TIME_IS_VALID (stream->segment.stop))
-            stream->accumulated_base +=
-                (stream->segment.stop -
-                stream->segment.start) / ABS (stream->segment.rate);
           continue;
         }
 
@@ -2550,7 +2542,6 @@ gst_qtdemux_stream_flush_segments_data (QtDemuxStream * stream)
   g_free (stream->segments);
   stream->segments = NULL;
   stream->segment_index = -1;
-  stream->accumulated_base = 0;
 }
 
 static void
@@ -4926,8 +4917,9 @@ gst_qtdemux_stream_update_segment (GstQTDemux * qtdemux, QtDemuxStream * stream,
   stream->segment.flags = qtdemux->segment.flags;
 
   /* update the segment values used for clipping */
-  stream->segment.offset = qtdemux->segment.offset;
-  stream->segment.base = qtdemux->segment.base + stream->accumulated_base;
+  stream->segment.offset = 0;
+  stream->segment.base =
+      gst_segment_to_running_time (&qtdemux->segment, GST_FORMAT_TIME, offset);
   stream->segment.applied_rate = qtdemux->segment.applied_rate;
   stream->segment.rate = rate;
   stream->segment.start = start + QTSTREAMTIME_TO_GSTTIME (stream,
@@ -5250,12 +5242,6 @@ next_segment:
       stream->time_position = segment->stop_time;
     }
     /* make sure we select a new segment */
-
-    /* accumulate previous segments */
-    if (GST_CLOCK_TIME_IS_VALID (stream->segment.stop))
-      stream->accumulated_base +=
-          (stream->segment.stop -
-          stream->segment.start) / ABS (stream->segment.rate);
 
     stream->segment_index = -1;
   }
