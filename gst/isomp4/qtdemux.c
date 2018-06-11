@@ -1546,7 +1546,7 @@ no_format:
  */
 static gboolean
 gst_qtdemux_perform_seek (GstQTDemux * qtdemux, GstSegment * segment,
-    guint32 seqnum, GstSeekFlags flags)
+    gboolean update, guint32 seqnum, GstSeekFlags flags)
 {
   gint64 desired_offset;
   GList *iter;
@@ -1556,26 +1556,10 @@ gst_qtdemux_perform_seek (GstQTDemux * qtdemux, GstSegment * segment,
   GST_DEBUG_OBJECT (qtdemux, "seeking to %" GST_TIME_FORMAT,
       GST_TIME_ARGS (desired_offset));
 
-  /* may not have enough fragmented info to do this adjustment,
-   * and we can't scan (and probably should not) at this time with
-   * possibly flushing upstream */
-  if ((flags & GST_SEEK_FLAG_KEY_UNIT) && !qtdemux->fragmented) {
-    gint64 min_offset;
-    gboolean next, before, after;
-
-    before = ! !(flags & GST_SEEK_FLAG_SNAP_BEFORE);
-    after = ! !(flags & GST_SEEK_FLAG_SNAP_AFTER);
-    next = after && !before;
-    if (segment->rate < 0)
-      next = !next;
-
-    gst_qtdemux_adjust_seek (qtdemux, desired_offset, TRUE, next, &min_offset,
-        NULL);
-    GST_DEBUG_OBJECT (qtdemux, "keyframe seek, align to %"
-        GST_TIME_FORMAT, GST_TIME_ARGS (min_offset));
-    desired_offset = min_offset;
-  }
-
+  /* TODO: If !update we can keep all the streams at their current
+   * position and don't have to go through all the edst/segment finding
+   * machinary. We only need to send an updated segment in that case.
+   */
   /* and set all streams to the final position */
   gst_flow_combiner_reset (qtdemux->flowcombiner);
   qtdemux->segment_seqnum = seqnum;
@@ -1591,17 +1575,6 @@ gst_qtdemux_perform_seek (GstQTDemux * qtdemux, GstSegment * segment,
 
     if (segment->flags & GST_SEEK_FLAG_FLUSH)
       gst_segment_init (&stream->segment, GST_FORMAT_TIME);
-  }
-  segment->position = desired_offset;
-  segment->time = desired_offset;
-  if (segment->rate >= 0) {
-    segment->start = desired_offset;
-
-    /* we stop at the end */
-    if (segment->stop == -1)
-      segment->stop = segment->duration;
-  } else {
-    segment->stop = desired_offset;
   }
 
   if (qtdemux->fragmented)
@@ -1676,12 +1649,57 @@ gst_qtdemux_do_seek (GstQTDemux * qtdemux, GstPad * pad, GstEvent * event)
       ret = FALSE;
       GST_ERROR_OBJECT (qtdemux, "inconsistent seek values, doing nothing");
     } else {
+      /* always do full update if flushing,
+       * otherwise problems might arise downstream with missing keyframes etc */
+      update = update || flush;
+
+      /* if the position is updated and we're supposed to do a KEY_UNIT seek,
+       * run gst_segment_do_seek() again with the position of the selected
+       * keyframe. By this we ensure that we're actually snapping to that
+       * keyframe running-time wise.
+       *
+       * We may not have enough fragmented info to do this adjustment,
+       * and we can't scan (and probably should not) at this time with
+       * possibly flushing upstream */
+      if (!update && (flags & GST_SEEK_FLAG_KEY_UNIT) && !qtdemux->fragmented) {
+        gint64 min_offset;
+        gboolean next, before, after;
+
+        before = ! !(flags & GST_SEEK_FLAG_SNAP_BEFORE);
+        after = ! !(flags & GST_SEEK_FLAG_SNAP_AFTER);
+        next = after && !before;
+        if (rate < 0)
+          next = !next;
+
+        gst_qtdemux_adjust_seek (qtdemux, seeksegment.position, TRUE, next,
+            &min_offset, NULL);
+        GST_DEBUG_OBJECT (qtdemux, "keyframe seek, align to %" GST_TIME_FORMAT,
+            GST_TIME_ARGS (min_offset));
+
+        if (min_offset != seeksegment.position) {
+          memcpy (&seeksegment, &qtdemux->segment, sizeof (GstSegment));
+
+          if (rate < 0) {
+            stop = min_offset;
+            stop_type = GST_SEEK_TYPE_SET;
+          } else {
+            cur = min_offset;
+            cur_type = GST_SEEK_TYPE_SET;
+          }
+
+          gst_segment_do_seek (&seeksegment, rate, format, flags,
+              cur_type, cur, stop_type, stop, NULL);
+        }
+      }
+
       /* now do the seek */
-      ret = gst_qtdemux_perform_seek (qtdemux, &seeksegment, seqnum, flags);
+      ret =
+          gst_qtdemux_perform_seek (qtdemux, &seeksegment, update, seqnum,
+          flags);
     }
   } else {
     /* now do the seek */
-    ret = gst_qtdemux_perform_seek (qtdemux, &seeksegment, seqnum, flags);
+    ret = gst_qtdemux_perform_seek (qtdemux, &seeksegment, TRUE, seqnum, flags);
   }
 
   /* prepare for streaming again */
