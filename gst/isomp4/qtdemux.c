@@ -4927,7 +4927,9 @@ gst_qtdemux_stream_update_segment (GstQTDemux * qtdemux, QtDemuxStream * stream,
   stream->segment.stop = stop + QTSTREAMTIME_TO_GSTTIME (stream,
       stream->cslg_shift);
   stream->segment.time = time;
-  stream->segment.position = stream->segment.start;
+  stream->segment.position =
+      (stream->segment.rate >
+      0 ? stream->segment.start : stream->segment.stop);
 
   GST_DEBUG_OBJECT (stream->pad, "New segment: %" GST_SEGMENT_FORMAT,
       &stream->segment);
