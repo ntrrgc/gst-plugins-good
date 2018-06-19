@@ -836,6 +836,9 @@ gst_splitmux_part_reader_seek_to_segment (GstSplitMuxPartReader * reader,
 
   SPLITMUX_PART_UNLOCK (reader);
 
+  if (target_seg->rate < 0 && !GST_CLOCK_TIME_IS_VALID (stop))
+    stop = target_seg->duration;
+
   GST_DEBUG_OBJECT (reader,
       "Seeking rate %f format %d flags 0x%x start %" GST_TIME_FORMAT " stop %"
       GST_TIME_FORMAT, target_seg->rate, target_seg->format, flags,
